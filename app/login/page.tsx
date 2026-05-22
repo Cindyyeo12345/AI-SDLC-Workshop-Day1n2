@@ -44,6 +44,8 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [webAuthnSupported, setWebAuthnSupported] = useState(true);
   const [platformAuthAvailable, setPlatformAuthAvailable] = useState(true);
+  const [devLoading, setDevLoading] = useState(false);
+  const isDev = process.env.NODE_ENV === 'development';
   const router = useRouter();
 
   useEffect(() => {
@@ -196,6 +198,39 @@ export default function LoginPage() {
             <strong>Passkeys</strong> use your device's biometrics or PIN for secure, passwordless authentication.
           </p>
         </div>
+
+        {isDev && (
+          <div className="mt-6 pt-6 border-t border-dashed border-gray-300">
+            <p className="text-xs font-semibold text-orange-600 uppercase tracking-wide mb-3">
+              🛠 Dev Mode
+            </p>
+            <button
+              onClick={async () => {
+                setDevLoading(true);
+                try {
+                  const res = await fetch('/api/auth/dev-login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: 'dev' }),
+                  });
+                  if (!res.ok) throw new Error('Dev login failed');
+                  router.push('/');
+                } catch {
+                  setError('Dev login failed');
+                } finally {
+                  setDevLoading(false);
+                }
+              }}
+              disabled={devLoading}
+              className="w-full px-4 py-2 bg-orange-500 text-white text-sm rounded-lg hover:bg-orange-600 disabled:opacity-50 transition-colors"
+            >
+              {devLoading ? 'Logging in...' : '⚡ Quick Dev Login'}
+            </button>
+            <p className="text-xs text-gray-400 mt-2">
+              Logs in as "dev" user. Not available in production.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );
