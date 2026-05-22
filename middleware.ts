@@ -5,7 +5,7 @@ import { getSession } from './lib/auth';
 export async function middleware(request: NextRequest) {
   const session = await getSession();
 
-  const protectedRoutes = ['/'];
+  const protectedRoutes = ['/', '/calendar'];
   const isProtectedRoute = protectedRoutes.some(route =>
     request.nextUrl.pathname === route || request.nextUrl.pathname.startsWith(route + '/')
   );
@@ -22,5 +22,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/', '/login'],
+  matcher: ['/', '/login', '/calendar'],
 };

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo, useRef } from 'react';
+import Link from 'next/link';
 import { formatSingaporeDate, isOverdue, isDueToday, isDueThisWeek } from '@/lib/timezone';
 import { useNotifications } from '@/lib/hooks/useNotifications';
 
@@ -913,6 +914,13 @@ export default function HomePage() {
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-900">My Todos</h1>
         <div className="flex items-center gap-2">
+          <Link
+            href="/calendar"
+            data-testid="calendar-view-link"
+            className="text-sm px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors font-medium"
+          >
+            📅 Calendar
+          </Link>
           <button
             data-testid="enable-notifications-btn"
             onClick={isEnabled ? toggleMute : requestPermission}
