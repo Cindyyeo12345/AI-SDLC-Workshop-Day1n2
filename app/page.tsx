@@ -80,7 +80,7 @@ function DueDateBadge({ dueDate }: { dueDate: string }) {
         data-testid="overdue-badge"
         className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium"
       >
-        Overdue · {formatSingaporeDate(dueDate, 'dd MMM yyyy')}
+        Overdue · {formatSingaporeDate(dueDate)}
       </span>
     );
   }
@@ -90,7 +90,7 @@ function DueDateBadge({ dueDate }: { dueDate: string }) {
         data-testid="todo-due-date"
         className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 font-medium"
       >
-        Today · {formatSingaporeDate(dueDate, 'dd MMM yyyy')}
+        Today · {formatSingaporeDate(dueDate)}
       </span>
     );
   }
@@ -100,7 +100,7 @@ function DueDateBadge({ dueDate }: { dueDate: string }) {
         data-testid="todo-due-date"
         className="text-xs px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700 font-medium"
       >
-        {formatSingaporeDate(dueDate, 'dd MMM yyyy')}
+        {formatSingaporeDate(dueDate)}
       </span>
     );
   }
