@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { formatSingaporeDate, isOverdue, isDueToday, isDueThisWeek } from '@/lib/timezone';
+import { useNotifications } from '@/lib/hooks/useNotifications';
 
 type Priority = 'high' | 'medium' | 'low';
 type RecurrencePattern = 'daily' | 'weekly' | 'monthly' | 'yearly';
@@ -27,6 +28,7 @@ interface EditState {
   due_date: string;
   notes: string;
   priority: Priority;
+  reminder_minutes: number | null;
 }
 
 const PRIORITY_STYLES: Record<Priority, string> = {
@@ -34,6 +36,12 @@ const PRIORITY_STYLES: Record<Priority, string> = {
   medium: 'bg-yellow-500 text-white',
   low:    'bg-blue-500 text-white',
 };
+
+function formatReminderOffset(minutes: number): string {
+  if (minutes < 60) return `${minutes}m before`;
+  if (minutes < 1440) return `${minutes / 60}h before`;
+  return `${minutes / 1440}d before`;
+}
 
 function PriorityBadge({ priority }: { priority: Priority }) {
   return (
@@ -111,6 +119,7 @@ function TodoCard({
     due_date: todo.due_date ?? '',
     notes: todo.notes ?? '',
     priority: todo.priority,
+    reminder_minutes: todo.reminder_minutes,
   });
   const [editError, setEditError] = useState<string | null>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
@@ -122,6 +131,7 @@ function TodoCard({
         due_date: todo.due_date ?? '',
         notes: todo.notes ?? '',
         priority: todo.priority,
+        reminder_minutes: todo.reminder_minutes,
       });
       setEditError(null);
       setTimeout(() => titleInputRef.current?.focus(), 0);
@@ -138,6 +148,7 @@ function TodoCard({
       due_date: editState.due_date || null,
       notes: editState.notes || null,
       priority: editState.priority,
+      reminder_minutes: editState.reminder_minutes,
     });
   };
 
@@ -149,9 +160,7 @@ function TodoCard({
   if (isEditing) {
     return (
       <div data-testid="todo-item" className="bg-white border border-blue-300 rounded-lg p-4 mb-2 shadow-sm">
-        {editError && (
-          <p className="text-red-500 text-sm mb-2">{editError}</p>
-        )}
+        {editError && <p className="text-red-500 text-sm mb-2">{editError}</p>}
         <input
           ref={titleInputRef}
           data-testid="edit-title-input"
@@ -176,9 +185,28 @@ function TodoCard({
           <input
             type="datetime-local"
             value={editState.due_date}
-            onChange={e => setEditState(s => ({ ...s, due_date: e.target.value }))}
+            onChange={e => setEditState(s => ({ ...s, due_date: e.target.value, reminder_minutes: e.target.value ? s.reminder_minutes : null }))}
             className="flex-1 border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
           />
+        </div>
+        <div className="mb-2">
+          <select
+            data-testid="edit-reminder-select"
+            value={editState.reminder_minutes ?? ''}
+            onChange={e => setEditState(s => ({ ...s, reminder_minutes: e.target.value ? Number(e.target.value) : null }))}
+            disabled={!editState.due_date}
+            className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <option value="">No reminder</option>
+            <option value="1">1 minute before</option>
+            <option value="15">15 minutes before</option>
+            <option value="30">30 minutes before</option>
+            <option value="60">1 hour before</option>
+            <option value="120">2 hours before</option>
+            <option value="1440">1 day before</option>
+            <option value="2880">2 days before</option>
+            <option value="10080">1 week before</option>
+          </select>
         </div>
         <textarea
           value={editState.notes}
@@ -227,11 +255,14 @@ function TodoCard({
           </p>
           <PriorityBadge priority={todo.priority} />
         </div>
-        {todo.due_date && (
-          <div className="mt-1">
-            <DueDateBadge dueDate={todo.due_date} />
-          </div>
-        )}
+        <div className="mt-1 flex flex-wrap gap-1.5 items-center">
+          {todo.due_date && <DueDateBadge dueDate={todo.due_date} />}
+          {todo.reminder_minutes && (
+            <span data-testid="reminder-badge" className="text-xs text-purple-600">
+              🔔 {formatReminderOffset(todo.reminder_minutes)}
+            </span>
+          )}
+        </div>
         {todo.notes && (
           <p className="mt-1 text-xs text-gray-500 truncate">{todo.notes}</p>
         )}
@@ -259,6 +290,7 @@ function TodoCard({
 }
 
 export default function HomePage() {
+  const { isEnabled, isMuted, requestPermission, toggleMute } = useNotifications();
   const [todos, setTodos] = useState<Todo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -266,6 +298,7 @@ export default function HomePage() {
   const [newDueDate, setNewDueDate] = useState('');
   const [newNotes, setNewNotes] = useState('');
   const [newPriority, setNewPriority] = useState<Priority>('medium');
+  const [newReminderMinutes, setNewReminderMinutes] = useState<number | null>(null);
   const [titleError, setTitleError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [priorityFilter, setPriorityFilter] = useState<'all' | Priority>('all');
@@ -283,6 +316,31 @@ export default function HomePage() {
       if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
     };
   }, []);
+
+  // Notification polling — fires immediately then every 30 seconds when enabled
+  useEffect(() => {
+    if (!isEnabled || isMuted) return;
+
+    const check = async () => {
+      try {
+        const res = await fetch('/api/notifications/check');
+        if (!res.ok) return;
+        const { notifications } = await res.json() as { notifications: { id: number; title: string }[] };
+        notifications.forEach(todo => {
+          new Notification('Todo Reminder', {
+            body: todo.title,
+            tag: `todo-${todo.id}`,
+          });
+        });
+      } catch {
+        // Silently ignore polling errors
+      }
+    };
+
+    check(); // immediate check on enable
+    const interval = setInterval(check, 30000);
+    return () => clearInterval(interval);
+  }, [isEnabled, isMuted]);
 
   const fetchTodos = async () => {
     try {
@@ -322,7 +380,7 @@ export default function HomePage() {
       due_date: newDueDate || null,
       notes: newNotes || null,
       recurrence: null,
-      reminder_minutes: null,
+      reminder_minutes: newReminderMinutes,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       completed_at: null,
@@ -330,23 +388,18 @@ export default function HomePage() {
     };
 
     setTodos(prev => [optimistic, ...prev]);
-    const savedTitle = newTitle.trim();
-    const savedPriority = newPriority;
+    const saved = { title: optimistic.title, priority: newPriority, due_date: optimistic.due_date, notes: optimistic.notes, reminder_minutes: newReminderMinutes };
     setNewTitle('');
     setNewDueDate('');
     setNewNotes('');
     setNewPriority('medium');
+    setNewReminderMinutes(null);
 
     try {
       const res = await fetch('/api/todos', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: savedTitle,
-          due_date: optimistic.due_date,
-          notes: optimistic.notes,
-          priority: savedPriority,
-        }),
+        body: JSON.stringify(saved),
       });
       if (!res.ok) throw new Error(await res.text());
       const created: Todo = await res.json();
@@ -407,14 +460,30 @@ export default function HomePage() {
 
   return (
     <main className="max-w-2xl mx-auto p-4 pt-8">
+      {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-900">My Todos</h1>
-        <button
-          onClick={handleLogout}
-          className="text-sm text-gray-500 hover:text-red-600 px-3 py-1.5 rounded-lg hover:bg-red-50 transition-colors"
-        >
-          Logout
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            data-testid="enable-notifications-btn"
+            onClick={isEnabled ? toggleMute : requestPermission}
+            className={`text-sm px-3 py-1.5 rounded-lg transition-colors ${
+              isEnabled
+                ? isMuted
+                  ? 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                  : 'bg-green-100 text-green-700 hover:bg-green-200'
+                : 'bg-blue-50 text-blue-600 hover:bg-blue-100'
+            }`}
+          >
+            {isEnabled ? (isMuted ? '🔕 Muted' : '🔔 Notifications On') : 'Enable Notifications'}
+          </button>
+          <button
+            onClick={handleLogout}
+            className="text-sm text-gray-500 hover:text-red-600 px-3 py-1.5 rounded-lg hover:bg-red-50 transition-colors"
+          >
+            Logout
+          </button>
+        </div>
       </div>
 
       {/* Error Banner */}
@@ -451,7 +520,7 @@ export default function HomePage() {
         {titleError && (
           <p data-testid="error-message" className="text-red-500 text-xs mb-2">{titleError}</p>
         )}
-        <div className="flex gap-2">
+        <div className="flex gap-2 mb-2">
           <select
             data-testid="new-priority-select"
             value={newPriority}
@@ -466,9 +535,31 @@ export default function HomePage() {
             data-testid="new-due-date-input"
             type="datetime-local"
             value={newDueDate}
-            onChange={e => setNewDueDate(e.target.value)}
+            onChange={e => {
+              setNewDueDate(e.target.value);
+              if (!e.target.value) setNewReminderMinutes(null);
+            }}
             className="flex-1 border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 text-gray-600"
           />
+        </div>
+        <div className="flex gap-2">
+          <select
+            data-testid="new-reminder-select"
+            value={newReminderMinutes ?? ''}
+            onChange={e => setNewReminderMinutes(e.target.value ? Number(e.target.value) : null)}
+            disabled={!newDueDate}
+            className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <option value="">No reminder</option>
+            <option value="1">1 minute before</option>
+            <option value="15">15 minutes before</option>
+            <option value="30">30 minutes before</option>
+            <option value="60">1 hour before</option>
+            <option value="120">2 hours before</option>
+            <option value="1440">1 day before</option>
+            <option value="2880">2 days before</option>
+            <option value="10080">1 week before</option>
+          </select>
           <textarea
             data-testid="new-notes-input"
             value={newNotes}
@@ -496,10 +587,7 @@ export default function HomePage() {
           <option value="low">Low Only</option>
         </select>
         {priorityFilter !== 'all' && (
-          <button
-            onClick={() => setPriorityFilter('all')}
-            className="text-xs text-gray-400 hover:text-gray-600"
-          >
+          <button onClick={() => setPriorityFilter('all')} className="text-xs text-gray-400 hover:text-gray-600">
             Clear ✕
           </button>
         )}

@@ -67,6 +67,7 @@ export interface CreateTodoInput {
   due_date?: string | null;
   notes?: string | null;
   priority?: Priority;
+  reminder_minutes?: number | null;
 }
 
 export interface UpdateTodoInput {
@@ -75,6 +76,7 @@ export interface UpdateTodoInput {
   due_date?: string | null;
   notes?: string | null;
   priority?: Priority;
+  reminder_minutes?: number | null;
 }
 
 export const todoDB = {
@@ -100,14 +102,15 @@ export const todoDB = {
   create: (userId: number, input: CreateTodoInput): Todo => {
     const now = getSingaporeNow().toISOString();
     const result = db.prepare(`
-      INSERT INTO todos (user_id, title, priority, due_date, notes, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO todos (user_id, title, priority, due_date, notes, reminder_minutes, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       userId,
       input.title.trim(),
       input.priority ?? 'medium',
       input.due_date ?? null,
       input.notes ?? null,
+      input.reminder_minutes ?? null,
       now,
       now
     );
@@ -127,20 +130,22 @@ export const todoDB = {
 
     db.prepare(`
       UPDATE todos SET
-        title        = ?,
-        completed    = ?,
-        priority     = ?,
-        due_date     = ?,
-        notes        = ?,
-        completed_at = ?,
-        updated_at   = ?
+        title            = ?,
+        completed        = ?,
+        priority         = ?,
+        due_date         = ?,
+        notes            = ?,
+        reminder_minutes = ?,
+        completed_at     = ?,
+        updated_at       = ?
       WHERE id = ? AND user_id = ?
     `).run(
       input.title       ?? todo.title,
       input.completed   !== undefined ? (input.completed ? 1 : 0) : (todo.completed ? 1 : 0),
       input.priority    ?? todo.priority,
-      'due_date' in input ? (input.due_date ?? null) : todo.due_date,
-      'notes'    in input ? (input.notes    ?? null) : todo.notes,
+      'due_date'         in input ? (input.due_date         ?? null) : todo.due_date,
+      'notes'            in input ? (input.notes            ?? null) : todo.notes,
+      'reminder_minutes' in input ? (input.reminder_minutes ?? null) : todo.reminder_minutes,
       completedAt,
       now,
       id,
