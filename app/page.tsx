@@ -7,6 +7,13 @@ import { useNotifications } from '@/lib/hooks/useNotifications';
 type Priority = 'high' | 'medium' | 'low';
 type RecurrencePattern = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
+interface Subtask {
+  id: number;
+  title: string;
+  completed: boolean;
+  position: number;
+}
+
 interface Todo {
   id: number;
   user_id: number;
@@ -80,7 +87,7 @@ function DueDateBadge({ dueDate }: { dueDate: string }) {
         data-testid="overdue-badge"
         className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium"
       >
-        Overdue · {formatSingaporeDate(dueDate, 'dd MMM yyyy')}
+        Overdue · {formatSingaporeDate(dueDate)}
       </span>
     );
   }
@@ -90,7 +97,7 @@ function DueDateBadge({ dueDate }: { dueDate: string }) {
         data-testid="todo-due-date"
         className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 font-medium"
       >
-        Today · {formatSingaporeDate(dueDate, 'dd MMM yyyy')}
+        Today · {formatSingaporeDate(dueDate)}
       </span>
     );
   }
@@ -100,7 +107,7 @@ function DueDateBadge({ dueDate }: { dueDate: string }) {
         data-testid="todo-due-date"
         className="text-xs px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700 font-medium"
       >
-        {formatSingaporeDate(dueDate, 'dd MMM yyyy')}
+        {formatSingaporeDate(dueDate)}
       </span>
     );
   }
@@ -129,23 +136,37 @@ function TagPill({ tag }: { tag: Tag }) {
 interface TodoCardProps {
   todo: Todo;
   availableTags: Tag[];
+  subtasks: Subtask[];
+  subtaskDraft: string;
   isEditing: boolean;
   onToggleComplete: () => void;
   onEdit: () => void;
   onSave: (data: TodoUpdatePayload) => void;
   onCancelEdit: () => void;
   onDelete: () => void;
+  onSubtaskDraftChange: (value: string) => void;
+  onAddSubtask: () => void;
+  onToggleSubtask: (subtaskId: number) => void;
+  onMoveSubtask: (subtaskId: number, direction: 'up' | 'down') => void;
+  onDeleteSubtask: (subtaskId: number) => void;
 }
 
 function TodoCard({
   todo,
   availableTags,
+  subtasks,
+  subtaskDraft,
   isEditing,
   onToggleComplete,
   onEdit,
   onSave,
   onCancelEdit,
   onDelete,
+  onSubtaskDraftChange,
+  onAddSubtask,
+  onToggleSubtask,
+  onMoveSubtask,
+  onDeleteSubtask,
 }: TodoCardProps) {
   const [editState, setEditState] = useState<EditState>({
     title: todo.title,
@@ -298,6 +319,12 @@ function TodoCard({
     );
   }
 
+  const orderedSubtasks = [...subtasks].sort((a, b) => a.position - b.position);
+  const completedSubtasks = orderedSubtasks.filter((subtask) => subtask.completed).length;
+  const progressPercent = orderedSubtasks.length === 0
+    ? 0
+    : Math.round((completedSubtasks / orderedSubtasks.length) * 100);
+
   return (
     <div
       data-testid="todo-item"
@@ -340,6 +367,87 @@ function TodoCard({
             ))}
           </div>
         )}
+
+        {(todo.tags ?? []).length > 0 && (
+          <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+            {(todo.tags ?? []).map((tag) => (
+              <TagPill key={tag.id} tag={tag} />
+            ))}
+          </div>
+        )}
+
+        <div className="mt-3 border border-gray-200 rounded-lg p-3 bg-gray-50" data-testid="subtasks-section">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Subtasks</p>
+            <span className="text-xs text-gray-600" data-testid="subtasks-progress-text">
+              {completedSubtasks}/{orderedSubtasks.length} ({progressPercent}%)
+            </span>
+          </div>
+
+          <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden mb-2" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progressPercent}>
+            <div className="h-full bg-green-500 transition-all" style={{ width: `${progressPercent}%` }} data-testid="subtasks-progress-bar" />
+          </div>
+
+          <div className="flex gap-2 mb-2">
+            <input
+              data-testid="new-subtask-input"
+              type="text"
+              value={subtaskDraft}
+              onChange={e => onSubtaskDraftChange(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && onAddSubtask()}
+              placeholder="Add subtask"
+              className="flex-1 border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-400"
+            />
+            <button
+              data-testid="add-subtask-button"
+              onClick={onAddSubtask}
+              className="px-2 py-1 text-xs rounded bg-blue-600 text-white hover:bg-blue-700"
+            >
+              Add
+            </button>
+          </div>
+
+          {orderedSubtasks.length > 0 && (
+            <ul className="space-y-1">
+              {orderedSubtasks.map((subtask, index) => (
+                <li key={subtask.id} className="flex items-center gap-2" data-testid="subtask-item">
+                  <input
+                    type="checkbox"
+                    checked={subtask.completed}
+                    onChange={() => onToggleSubtask(subtask.id)}
+                    data-testid="subtask-checkbox"
+                  />
+                  <span className={`flex-1 text-xs ${subtask.completed ? 'line-through text-gray-400' : 'text-gray-700'}`}>
+                    {subtask.title}
+                  </span>
+                  <button
+                    data-testid="move-subtask-up"
+                    disabled={index === 0}
+                    onClick={() => onMoveSubtask(subtask.id, 'up')}
+                    className="px-1.5 py-0.5 rounded border border-gray-300 text-xs disabled:opacity-40"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    data-testid="move-subtask-down"
+                    disabled={index === orderedSubtasks.length - 1}
+                    onClick={() => onMoveSubtask(subtask.id, 'down')}
+                    className="px-1.5 py-0.5 rounded border border-gray-300 text-xs disabled:opacity-40"
+                  >
+                    ↓
+                  </button>
+                  <button
+                    data-testid="delete-subtask-button"
+                    onClick={() => onDeleteSubtask(subtask.id)}
+                    className="px-1.5 py-0.5 rounded border border-red-200 text-red-600 text-xs hover:bg-red-50"
+                  >
+                    Delete
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
       <div className="flex gap-1 shrink-0">
         <button
@@ -386,7 +494,10 @@ export default function HomePage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [priorityFilter, setPriorityFilter] = useState<'all' | Priority>('all');
   const [tagFilter, setTagFilter] = useState<'all' | number>('all');
+  const [subtasksByTodo, setSubtasksByTodo] = useState<Record<number, Subtask[]>>({});
+  const [subtaskDrafts, setSubtaskDrafts] = useState<Record<number, string>>({});
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const subtaskIdCounterRef = useRef(1);
 
   const showError = (msg: string) => {
     setError(msg);
@@ -565,9 +676,78 @@ export default function HomePage() {
       }
       showError('Failed to delete todo. Please try again.');
     }
+
+    setSubtasksByTodo(prev => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    setSubtaskDrafts(prev => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
   };
 
   const toggleComplete = (todo: Todo) => updateTodo(todo.id, { completed: !todo.completed });
+
+  const addSubtask = (todoId: number) => {
+    const title = (subtaskDrafts[todoId] ?? '').trim();
+    if (!title) return;
+
+    const nextSubtask: Subtask = {
+      id: subtaskIdCounterRef.current++,
+      title,
+      completed: false,
+      position: (subtasksByTodo[todoId] ?? []).length,
+    };
+
+    setSubtasksByTodo(prev => ({
+      ...prev,
+      [todoId]: [...(prev[todoId] ?? []), nextSubtask],
+    }));
+    setSubtaskDrafts(prev => ({ ...prev, [todoId]: '' }));
+  };
+
+  const toggleSubtask = (todoId: number, subtaskId: number) => {
+    setSubtasksByTodo(prev => ({
+      ...prev,
+      [todoId]: (prev[todoId] ?? []).map(subtask =>
+        subtask.id === subtaskId ? { ...subtask, completed: !subtask.completed } : subtask
+      ),
+    }));
+  };
+
+  const moveSubtask = (todoId: number, subtaskId: number, direction: 'up' | 'down') => {
+    setSubtasksByTodo(prev => {
+      const current = [...(prev[todoId] ?? [])].sort((a, b) => a.position - b.position);
+      const index = current.findIndex(item => item.id === subtaskId);
+      if (index < 0) return prev;
+
+      const targetIndex = direction === 'up' ? index - 1 : index + 1;
+      if (targetIndex < 0 || targetIndex >= current.length) return prev;
+
+      const reordered = [...current];
+      [reordered[index], reordered[targetIndex]] = [reordered[targetIndex], reordered[index]];
+
+      return {
+        ...prev,
+        [todoId]: reordered.map((item, i) => ({ ...item, position: i })),
+      };
+    });
+  };
+
+  const deleteSubtask = (todoId: number, subtaskId: number) => {
+    setSubtasksByTodo(prev => {
+      const remaining = (prev[todoId] ?? []).filter(item => item.id !== subtaskId);
+      return {
+        ...prev,
+        [todoId]: remaining
+          .sort((a, b) => a.position - b.position)
+          .map((item, index) => ({ ...item, position: index })),
+      };
+    });
+  };
 
   const filtered = priorityFilter === 'all' ? todos : todos.filter(t => t.priority === priorityFilter);
   const filteredByTag = tagFilter === 'all'
@@ -970,12 +1150,20 @@ export default function HomePage() {
               key={todo.id}
               todo={todo}
               availableTags={tags}
+              availableTags={tags}
+              subtasks={subtasksByTodo[todo.id] ?? []}
+              subtaskDraft={subtaskDrafts[todo.id] ?? ''}
               isEditing={editingId === todo.id}
               onToggleComplete={() => toggleComplete(todo)}
               onEdit={() => setEditingId(todo.id)}
               onSave={data => { updateTodo(todo.id, data); setEditingId(null); }}
               onCancelEdit={() => setEditingId(null)}
               onDelete={() => deleteTodo(todo.id)}
+              onSubtaskDraftChange={value => setSubtaskDrafts(prev => ({ ...prev, [todo.id]: value }))}
+              onAddSubtask={() => addSubtask(todo.id)}
+              onToggleSubtask={subtaskId => toggleSubtask(todo.id, subtaskId)}
+              onMoveSubtask={(subtaskId, direction) => moveSubtask(todo.id, subtaskId, direction)}
+              onDeleteSubtask={subtaskId => deleteSubtask(todo.id, subtaskId)}
             />
           ))
         )}
@@ -992,12 +1180,20 @@ export default function HomePage() {
               key={todo.id}
               todo={todo}
               availableTags={tags}
+              availableTags={tags}
+              subtasks={subtasksByTodo[todo.id] ?? []}
+              subtaskDraft={subtaskDrafts[todo.id] ?? ''}
               isEditing={editingId === todo.id}
               onToggleComplete={() => toggleComplete(todo)}
               onEdit={() => setEditingId(todo.id)}
               onSave={data => { updateTodo(todo.id, data); setEditingId(null); }}
               onCancelEdit={() => setEditingId(null)}
               onDelete={() => deleteTodo(todo.id)}
+              onSubtaskDraftChange={value => setSubtaskDrafts(prev => ({ ...prev, [todo.id]: value }))}
+              onAddSubtask={() => addSubtask(todo.id)}
+              onToggleSubtask={subtaskId => toggleSubtask(todo.id, subtaskId)}
+              onMoveSubtask={(subtaskId, direction) => moveSubtask(todo.id, subtaskId, direction)}
+              onDeleteSubtask={subtaskId => deleteSubtask(todo.id, subtaskId)}
             />
           ))}
         </section>
