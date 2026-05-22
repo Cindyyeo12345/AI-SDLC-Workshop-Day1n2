@@ -354,9 +354,22 @@ export default function HomePage() {
   const activeTodos = todos.filter(t => !t.completed);
   const completedTodos = todos.filter(t => t.completed);
 
+  const handleLogout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    window.location.href = '/login';
+  };
+
   return (
     <main className="max-w-2xl mx-auto p-4 pt-8">
-      <h1 className="text-2xl font-bold mb-6 text-gray-900">My Todos</h1>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-bold text-gray-900">My Todos</h1>
+        <button
+          onClick={handleLogout}
+          className="text-sm text-gray-500 hover:text-red-600 px-3 py-1.5 rounded-lg hover:bg-red-50 transition-colors"
+        >
+          Logout
+        </button>
+      </div>
 
       {/* Error Banner */}
       {error && (
