@@ -1,0 +1,27 @@
+{
+  "name": "ai-sdlc-workshop-day1n2",
+  "version": "1.0.0",
+  "private": true,
+  "description": "This walkthrough will guide you from zero to running the Todo App with GitHub Copilot assistance.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "next": "^16.0.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Cindyyeo12345/AI-SDLC-Workshop-Day1n2.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Cindyyeo12345/AI-SDLC-Workshop-Day1n2/issues"
+  },
+  "homepage": "https://github.com/Cindyyeo12345/AI-SDLC-Workshop-Day1n2#readme"
+}
