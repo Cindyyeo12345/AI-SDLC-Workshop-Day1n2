@@ -25,7 +25,7 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json();
-    const { title, due_date, notes, priority } = body;
+    const { title, due_date, notes, priority, recurrence, reminder_minutes } = body;
 
     if (!title || typeof title !== 'string' || title.trim().length === 0) {
       return NextResponse.json({ error: 'Title is required' }, { status: 400 });
@@ -34,11 +34,25 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Title must be 500 characters or fewer' }, { status: 400 });
     }
 
+    if (recurrence && !['daily', 'weekly', 'monthly', 'yearly'].includes(recurrence)) {
+      return NextResponse.json({ error: 'Invalid recurrence pattern' }, { status: 400 });
+    }
+
+    if (recurrence && !due_date) {
+      return NextResponse.json({ error: 'Recurring todos require a due date' }, { status: 400 });
+    }
+
+    if (reminder_minutes !== undefined && reminder_minutes !== null && !due_date) {
+      return NextResponse.json({ error: 'Reminders require a due date' }, { status: 400 });
+    }
+
     const todo = todoDB.create(session.userId, {
       title,
       due_date: due_date ?? null,
       notes: notes ?? null,
       priority: priority ?? 'medium',
+      reminder_minutes: reminder_minutes ?? null,
+      recurrence: recurrence ?? null,
     });
 
     return NextResponse.json(todo, { status: 201 });

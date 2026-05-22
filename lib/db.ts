@@ -1,8 +1,12 @@
 import Database from 'better-sqlite3';
 import path from 'path';
+import fs from 'fs';
 import { getSingaporeNow } from './timezone';
 
 const dataDir = process.env.DATA_DIR || process.cwd();
+if (!fs.existsSync(dataDir)) {
+  fs.mkdirSync(dataDir, { recursive: true });
+}
 const dbPath = path.join(dataDir, 'todos.db');
 const db = new Database(dbPath);
 
@@ -68,6 +72,7 @@ export interface CreateTodoInput {
   notes?: string | null;
   priority?: Priority;
   reminder_minutes?: number | null;
+  recurrence?: RecurrencePattern | null;
 }
 
 export interface UpdateTodoInput {
@@ -77,6 +82,28 @@ export interface UpdateTodoInput {
   notes?: string | null;
   priority?: Priority;
   reminder_minutes?: number | null;
+  recurrence?: RecurrencePattern | null;
+}
+
+function addRecurrenceDueDate(dueDate: string, recurrence: RecurrencePattern): string {
+  const next = new Date(dueDate);
+
+  switch (recurrence) {
+    case 'daily':
+      next.setDate(next.getDate() + 1);
+      break;
+    case 'weekly':
+      next.setDate(next.getDate() + 7);
+      break;
+    case 'monthly':
+      next.setMonth(next.getMonth() + 1);
+      break;
+    case 'yearly':
+      next.setFullYear(next.getFullYear() + 1);
+      break;
+  }
+
+  return next.toISOString();
 }
 
 export const todoDB = {
@@ -102,14 +129,15 @@ export const todoDB = {
   create: (userId: number, input: CreateTodoInput): Todo => {
     const now = getSingaporeNow().toISOString();
     const result = db.prepare(`
-      INSERT INTO todos (user_id, title, priority, due_date, notes, reminder_minutes, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO todos (user_id, title, priority, due_date, notes, recurrence, reminder_minutes, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       userId,
       input.title.trim(),
       input.priority ?? 'medium',
       input.due_date ?? null,
       input.notes ?? null,
+      input.recurrence ?? null,
       input.reminder_minutes ?? null,
       now,
       now
@@ -128,29 +156,53 @@ export const todoDB = {
         ? null
         : todo.completed_at;
 
+    const nextRecurrence = 'recurrence' in input ? (input.recurrence ?? null) : todo.recurrence;
+    const becameCompleted = input.completed === true && !todo.completed;
+
     db.prepare(`
       UPDATE todos SET
-        title            = ?,
-        completed        = ?,
-        priority         = ?,
-        due_date         = ?,
-        notes            = ?,
+        title        = ?,
+        completed    = ?,
+        priority     = ?,
+        due_date     = ?,
+        notes        = ?,
+        recurrence   = ?,
         reminder_minutes = ?,
-        completed_at     = ?,
-        updated_at       = ?
+        completed_at = ?,
+        updated_at   = ?
       WHERE id = ? AND user_id = ?
     `).run(
       input.title       ?? todo.title,
       input.completed   !== undefined ? (input.completed ? 1 : 0) : (todo.completed ? 1 : 0),
       input.priority    ?? todo.priority,
-      'due_date'         in input ? (input.due_date         ?? null) : todo.due_date,
-      'notes'            in input ? (input.notes            ?? null) : todo.notes,
+      'due_date' in input ? (input.due_date ?? null) : todo.due_date,
+      'notes'    in input ? (input.notes    ?? null) : todo.notes,
+      nextRecurrence,
       'reminder_minutes' in input ? (input.reminder_minutes ?? null) : todo.reminder_minutes,
       completedAt,
       now,
       id,
       userId
     );
+
+    if (becameCompleted && todo.recurrence && todo.due_date) {
+      const nextDueDate = addRecurrenceDueDate(todo.due_date, todo.recurrence);
+      db.prepare(`
+        INSERT INTO todos (user_id, title, priority, due_date, notes, recurrence, reminder_minutes, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        userId,
+        todo.title,
+        todo.priority,
+        nextDueDate,
+        todo.notes,
+        todo.recurrence,
+        todo.reminder_minutes,
+        now,
+        now
+      );
+    }
+
     return todoDB.getById(id, userId);
   },
 

@@ -31,6 +31,13 @@ interface EditState {
   reminder_minutes: number | null;
 }
 
+const RECURRENCE_LABELS: Record<RecurrencePattern, string> = {
+  daily: 'Daily',
+  weekly: 'Weekly',
+  monthly: 'Monthly',
+  yearly: 'Yearly',
+};
+
 const PRIORITY_STYLES: Record<Priority, string> = {
   high:   'bg-red-500 text-white',
   medium: 'bg-yellow-500 text-white',
@@ -254,6 +261,11 @@ function TodoCard({
             {todo.title}
           </p>
           <PriorityBadge priority={todo.priority} />
+          {todo.recurrence && (
+            <span className="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 border border-purple-300 font-medium">
+              🔄 {RECURRENCE_LABELS[todo.recurrence]}
+            </span>
+          )}
         </div>
         <div className="mt-1 flex flex-wrap gap-1.5 items-center">
           {todo.due_date && <DueDateBadge dueDate={todo.due_date} />}
@@ -299,6 +311,8 @@ export default function HomePage() {
   const [newNotes, setNewNotes] = useState('');
   const [newPriority, setNewPriority] = useState<Priority>('medium');
   const [newReminderMinutes, setNewReminderMinutes] = useState<number | null>(null);
+  const [newIsRecurring, setNewIsRecurring] = useState(false);
+  const [newRecurrence, setNewRecurrence] = useState<RecurrencePattern>('daily');
   const [titleError, setTitleError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [priorityFilter, setPriorityFilter] = useState<'all' | Priority>('all');
@@ -368,6 +382,10 @@ export default function HomePage() {
       setTitleError('Title must be 500 characters or fewer');
       return;
     }
+    if (newIsRecurring && !newDueDate) {
+      setTitleError('Recurring todos require a due date');
+      return;
+    }
     setTitleError(null);
 
     const tempId = Date.now();
@@ -379,7 +397,7 @@ export default function HomePage() {
       priority: newPriority,
       due_date: newDueDate || null,
       notes: newNotes || null,
-      recurrence: null,
+      recurrence: newIsRecurring ? newRecurrence : null,
       reminder_minutes: newReminderMinutes,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -388,18 +406,30 @@ export default function HomePage() {
     };
 
     setTodos(prev => [optimistic, ...prev]);
-    const saved = { title: optimistic.title, priority: newPriority, due_date: optimistic.due_date, notes: optimistic.notes, reminder_minutes: newReminderMinutes };
+    const savedTitle = newTitle.trim();
+    const savedPriority = newPriority;
+    const savedReminderMinutes = newReminderMinutes;
+    const savedRecurrence = newIsRecurring ? newRecurrence : null;
     setNewTitle('');
     setNewDueDate('');
     setNewNotes('');
     setNewPriority('medium');
     setNewReminderMinutes(null);
+    setNewIsRecurring(false);
+    setNewRecurrence('daily');
 
     try {
       const res = await fetch('/api/todos', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(saved),
+        body: JSON.stringify({
+          title: savedTitle,
+          due_date: optimistic.due_date,
+          notes: optimistic.notes,
+          priority: savedPriority,
+          reminder_minutes: savedReminderMinutes,
+          recurrence: savedRecurrence,
+        }),
       });
       if (!res.ok) throw new Error(await res.text());
       const created: Todo = await res.json();
@@ -569,6 +599,31 @@ export default function HomePage() {
             maxLength={2000}
             className="flex-1 border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
           />
+        </div>
+        <div className="mt-3 flex items-center gap-3">
+          <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+            <input
+              data-testid="repeat-checkbox"
+              type="checkbox"
+              checked={newIsRecurring}
+              onChange={e => setNewIsRecurring(e.target.checked)}
+              className="w-4 h-4 cursor-pointer accent-blue-600"
+            />
+            Repeat
+          </label>
+          {newIsRecurring && (
+            <select
+              data-testid="recurrence-select"
+              value={newRecurrence}
+              onChange={e => setNewRecurrence(e.target.value as RecurrencePattern)}
+              className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+            >
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+              <option value="yearly">Yearly</option>
+            </select>
+          )}
         </div>
       </div>
 

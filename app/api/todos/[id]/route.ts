@@ -29,6 +29,26 @@ export async function PUT(
       }
     }
 
+    if ('recurrence' in body && body.recurrence !== null && !['daily', 'weekly', 'monthly', 'yearly'].includes(body.recurrence)) {
+      return NextResponse.json({ error: 'Invalid recurrence pattern' }, { status: 400 });
+    }
+
+    if ('recurrence' in body && body.recurrence && !('due_date' in body) && !todoDB.getById(todoId, session.userId)?.due_date) {
+      return NextResponse.json({ error: 'Recurring todos require a due date' }, { status: 400 });
+    }
+
+    if ('recurrence' in body && body.recurrence && 'due_date' in body && !body.due_date) {
+      return NextResponse.json({ error: 'Recurring todos require a due date' }, { status: 400 });
+    }
+
+    if ('reminder_minutes' in body && body.reminder_minutes !== null && body.reminder_minutes !== undefined) {
+      const existingTodo = todoDB.getById(todoId, session.userId);
+      const effectiveDueDate = 'due_date' in body ? body.due_date : existingTodo?.due_date;
+      if (!effectiveDueDate) {
+        return NextResponse.json({ error: 'Reminders require a due date' }, { status: 400 });
+      }
+    }
+
     const updated = todoDB.update(todoId, session.userId, body);
     if (!updated) {
       return NextResponse.json({ error: 'Todo not found' }, { status: 404 });
