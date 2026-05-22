@@ -808,7 +808,15 @@ export default function HomePage() {
   }, [todos, priorityFilter, tagFilter, completionFilter, dueFilter, normalizedSearchQuery]);
 
   const activeTodos = filteredTodos.filter((todo) => !todo.completed);
-  const completedTodos = filteredTodos.filter((todo) => todo.completed);
+  const completedTodos = filteredTodos
+    .filter((todo) => todo.completed)
+    .sort((a, b) => {
+      // Sort completed todos by most recent completion time first (AC from PRP-01)
+      if (!a.completed_at && !b.completed_at) return 0;
+      if (!a.completed_at) return 1;
+      if (!b.completed_at) return -1;
+      return new Date(b.completed_at).getTime() - new Date(a.completed_at).getTime();
+    });
   const hasActiveFilter =
     !!normalizedSearchQuery ||
     priorityFilter !== 'all' ||
@@ -1269,10 +1277,12 @@ export default function HomePage() {
       <section data-testid="active-section">
         {loading ? (
           <p className="text-gray-400 text-center py-8">Loading...</p>
+        ) : todos.length === 0 ? (
+          <p className="text-gray-400 text-center py-8">No todos yet. Add one above! 🎉</p>
         ) : filteredTodos.length === 0 ? (
           <p className="text-gray-400 text-center py-8">No todos match the current search or filters.</p>
         ) : completionFilter === 'completed' ? null : activeTodos.length === 0 ? (
-          <p className="text-gray-400 text-center py-6">No active todos match the current search or filters.</p>
+          <p className="text-gray-400 text-center py-6">No active todos. All caught up! ✅</p>
         ) : (
           activeTodos.map(todo => (
             <TodoCard
