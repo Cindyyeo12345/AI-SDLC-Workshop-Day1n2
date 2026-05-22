@@ -41,6 +41,25 @@ db.exec(`
     completed_at           TEXT,
     last_notification_sent TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS tags (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name       TEXT    NOT NULL COLLATE NOCASE,
+    color      TEXT    NOT NULL,
+    created_at TEXT    NOT NULL,
+    UNIQUE(user_id, name)
+  );
+
+  CREATE TABLE IF NOT EXISTS todo_tags (
+    todo_id INTEGER NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
+    tag_id  INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+    PRIMARY KEY (todo_id, tag_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_tags_user_id ON tags(user_id);
+  CREATE INDEX IF NOT EXISTS idx_todo_tags_todo_id ON todo_tags(todo_id);
+  CREATE INDEX IF NOT EXISTS idx_todo_tags_tag_id ON todo_tags(tag_id);
 `);
 
 export type Priority = 'high' | 'medium' | 'low';
@@ -60,6 +79,7 @@ export interface Todo {
   updated_at: string;
   completed_at: string | null;
   last_notification_sent: string | null;
+  tags?: Tag[];
 }
 
 export interface CreateTodoInput {
@@ -68,6 +88,7 @@ export interface CreateTodoInput {
   notes?: string | null;
   priority?: Priority;
   reminder_minutes?: number | null;
+  tagIds?: number[];
 }
 
 export interface UpdateTodoInput {
@@ -77,26 +98,46 @@ export interface UpdateTodoInput {
   notes?: string | null;
   priority?: Priority;
   reminder_minutes?: number | null;
+  tagIds?: number[];
 }
 
 export const todoDB = {
-  getAll: (userId: number): Todo[] => {
-    return db.prepare(`
-      SELECT * FROM todos
-      WHERE user_id = ?
-      ORDER BY
-        completed ASC,
-        CASE priority WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END ASC,
-        CASE WHEN due_date IS NULL THEN 1 ELSE 0 END ASC,
-        due_date ASC,
-        created_at DESC
-    `).all(userId) as Todo[];
+  getAll: (userId: number, tagId?: number): Todo[] => {
+    const todos = (tagId
+      ? db.prepare(`
+          SELECT DISTINCT td.*
+          FROM todos td
+          INNER JOIN todo_tags tt ON tt.todo_id = td.id
+          WHERE td.user_id = ? AND tt.tag_id = ?
+          ORDER BY
+            td.completed ASC,
+            CASE td.priority WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END ASC,
+            CASE WHEN td.due_date IS NULL THEN 1 ELSE 0 END ASC,
+            td.due_date ASC,
+            td.created_at DESC
+        `).all(userId, tagId)
+      : db.prepare(`
+          SELECT * FROM todos
+          WHERE user_id = ?
+          ORDER BY
+            completed ASC,
+            CASE priority WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END ASC,
+            CASE WHEN due_date IS NULL THEN 1 ELSE 0 END ASC,
+            due_date ASC,
+            created_at DESC
+        `).all(userId)) as Todo[];
+
+    return attachTagsToTodos(todos, userId);
   },
 
   getById: (id: number, userId: number): Todo | null => {
-    return db.prepare(
+    const todo = db.prepare(
       'SELECT * FROM todos WHERE id = ? AND user_id = ?'
     ).get(id, userId) as Todo | null;
+    if (!todo) {
+      return null;
+    }
+    return attachTagsToTodos([todo], userId)[0];
   },
 
   create: (userId: number, input: CreateTodoInput): Todo => {
@@ -114,7 +155,13 @@ export const todoDB = {
       now,
       now
     );
-    return todoDB.getById(result.lastInsertRowid as number, userId)!;
+    const todoId = result.lastInsertRowid as number;
+
+    if (input.tagIds) {
+      replaceTodoTags(todoId, userId, input.tagIds);
+    }
+
+    return todoDB.getById(todoId, userId)!;
   },
 
   update: (id: number, userId: number, input: UpdateTodoInput): Todo | null => {
@@ -151,6 +198,11 @@ export const todoDB = {
       id,
       userId
     );
+
+    if (input.tagIds) {
+      replaceTodoTags(id, userId, input.tagIds);
+    }
+
     return todoDB.getById(id, userId);
   },
 
@@ -158,6 +210,150 @@ export const todoDB = {
     const result = db.prepare(
       'DELETE FROM todos WHERE id = ? AND user_id = ?'
     ).run(id, userId);
+    return result.changes > 0;
+  },
+};
+
+export interface Tag {
+  id: number;
+  user_id: number;
+  name: string;
+  color: string;
+  created_at: string;
+}
+
+export interface CreateTagInput {
+  name: string;
+  color: string;
+}
+
+export interface UpdateTagInput {
+  name?: string;
+  color?: string;
+}
+
+const attachTagsToTodos = (todos: Todo[], userId: number): Todo[] => {
+  if (todos.length === 0) {
+    return todos.map((todo) => ({ ...todo, tags: [] }));
+  }
+
+  const ids = todos.map((todo) => todo.id);
+  const placeholders = ids.map(() => '?').join(',');
+  const rows = db.prepare(`
+    SELECT tt.todo_id, t.id, t.user_id, t.name, t.color, t.created_at
+    FROM todo_tags tt
+    INNER JOIN tags t ON t.id = tt.tag_id
+    WHERE t.user_id = ? AND tt.todo_id IN (${placeholders})
+    ORDER BY t.name ASC
+  `).all(userId, ...ids) as Array<{ todo_id: number } & Tag>;
+
+  const tagMap = new Map<number, Tag[]>();
+  for (const row of rows) {
+    const existing = tagMap.get(row.todo_id) ?? [];
+    existing.push({
+      id: row.id,
+      user_id: row.user_id,
+      name: row.name,
+      color: row.color,
+      created_at: row.created_at,
+    });
+    tagMap.set(row.todo_id, existing);
+  }
+
+  return todos.map((todo) => ({
+    ...todo,
+    tags: tagMap.get(todo.id) ?? [],
+  }));
+};
+
+const getValidatedTagIds = (userId: number, tagIds: number[]): number[] => {
+  const normalized = Array.from(new Set(tagIds.filter((id) => Number.isInteger(id) && id > 0)));
+  if (normalized.length === 0) {
+    return [];
+  }
+
+  const placeholders = normalized.map(() => '?').join(',');
+  const found = db.prepare(`
+    SELECT id FROM tags WHERE user_id = ? AND id IN (${placeholders})
+  `).all(userId, ...normalized) as Array<{ id: number }>;
+
+  if (found.length !== normalized.length) {
+    throw new Error('Some tags are invalid for this user');
+  }
+
+  return normalized;
+};
+
+const replaceTodoTags = (todoId: number, userId: number, tagIds: number[]) => {
+  const validatedTagIds = getValidatedTagIds(userId, tagIds);
+
+  const exists = db.prepare('SELECT id FROM todos WHERE id = ? AND user_id = ?').get(todoId, userId) as { id: number } | undefined;
+  if (!exists) {
+    throw new Error('Todo not found');
+  }
+
+  db.prepare('DELETE FROM todo_tags WHERE todo_id = ?').run(todoId);
+
+  if (validatedTagIds.length === 0) {
+    return;
+  }
+
+  const insert = db.prepare('INSERT INTO todo_tags (todo_id, tag_id) VALUES (?, ?)');
+  const transaction = db.transaction((ids: number[]) => {
+    for (const tagId of ids) {
+      insert.run(todoId, tagId);
+    }
+  });
+  transaction(validatedTagIds);
+};
+
+export const tagDB = {
+  getAll: (userId: number): Tag[] => {
+    return db.prepare(`
+      SELECT * FROM tags
+      WHERE user_id = ?
+      ORDER BY name ASC
+    `).all(userId) as Tag[];
+  },
+
+  getById: (id: number, userId: number): Tag | null => {
+    return db.prepare(`
+      SELECT * FROM tags
+      WHERE id = ? AND user_id = ?
+    `).get(id, userId) as Tag | null;
+  },
+
+  create: (userId: number, input: CreateTagInput): Tag => {
+    const now = getSingaporeNow().toISOString();
+    const result = db.prepare(`
+      INSERT INTO tags (user_id, name, color, created_at)
+      VALUES (?, ?, ?, ?)
+    `).run(userId, input.name.trim(), input.color, now);
+
+    return tagDB.getById(result.lastInsertRowid as number, userId)!;
+  },
+
+  update: (id: number, userId: number, input: UpdateTagInput): Tag | null => {
+    const existing = tagDB.getById(id, userId);
+    if (!existing) {
+      return null;
+    }
+
+    db.prepare(`
+      UPDATE tags
+      SET name = ?, color = ?
+      WHERE id = ? AND user_id = ?
+    `).run(input.name ?? existing.name, input.color ?? existing.color, id, userId);
+
+    return tagDB.getById(id, userId);
+  },
+
+  delete: (id: number, userId: number): boolean => {
+    const result = db.prepare(`
+      DELETE FROM tags
+      WHERE id = ? AND user_id = ?
+    `).run(id, userId);
+
     return result.changes > 0;
   },
 };

@@ -28,6 +28,20 @@ export async function PUT(
         return NextResponse.json({ error: 'Title must be 500 characters or fewer' }, { status: 400 });
       }
     }
+    if ('tagIds' in body) {
+      if (!Array.isArray(body.tagIds)) {
+        return NextResponse.json({ error: 'tagIds must be an array' }, { status: 400 });
+      }
+      if (body.tagIds.some((id: unknown) => !Number.isInteger(id) || Number(id) <= 0)) {
+        return NextResponse.json({ error: 'tagIds must contain positive integers' }, { status: 400 });
+      }
+    }
+    if ('reminder_minutes' in body) {
+      const value = body.reminder_minutes;
+      if (value !== null && (!Number.isInteger(value) || Number(value) <= 0)) {
+        return NextResponse.json({ error: 'reminder_minutes must be a positive integer or null' }, { status: 400 });
+      }
+    }
 
     const updated = todoDB.update(todoId, session.userId, body);
     if (!updated) {
@@ -36,6 +50,9 @@ export async function PUT(
 
     return NextResponse.json(updated);
   } catch (error) {
+    if (error instanceof Error && error.message.includes('invalid for this user')) {
+      return NextResponse.json({ error: 'One or more tag IDs are invalid' }, { status: 400 });
+    }
     console.error('Failed to update todo:', error);
     return NextResponse.json({ error: 'Failed to update todo' }, { status: 500 });
   }
