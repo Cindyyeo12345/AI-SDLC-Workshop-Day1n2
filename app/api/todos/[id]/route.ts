@@ -41,6 +41,9 @@ export async function PUT(
       if (value !== null && (!Number.isInteger(value) || Number(value) <= 0)) {
         return NextResponse.json({ error: 'reminder_minutes must be a positive integer or null' }, { status: 400 });
       }
+      if (value !== null && 'due_date' in body && !body.due_date) {
+        return NextResponse.json({ error: 'reminder_minutes requires due_date' }, { status: 400 });
+      }
     }
 
     if ('recurrence' in body && body.recurrence !== null && !['daily', 'weekly', 'monthly', 'yearly'].includes(body.recurrence)) {

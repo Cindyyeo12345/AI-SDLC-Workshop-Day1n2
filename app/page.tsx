@@ -1,11 +1,13 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { formatSingaporeDate, isOverdue, isDueToday, isDueThisWeek } from '@/lib/timezone';
 import { useNotifications } from '@/lib/hooks/useNotifications';
 
 type Priority = 'high' | 'medium' | 'low';
 type RecurrencePattern = 'daily' | 'weekly' | 'monthly' | 'yearly';
+type CompletionFilter = 'all' | 'active' | 'completed';
+type DueFilter = 'all' | 'overdue' | 'today' | 'this-week' | 'no-due-date';
 
 interface Subtask {
   id: number;
@@ -67,6 +69,19 @@ function formatReminderOffset(minutes: number): string {
   if (minutes < 60) return `${minutes}m before`;
   if (minutes < 1440) return `${minutes / 60}h before`;
   return `${minutes / 1440}d before`;
+}
+
+function normalizeSearchValue(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function matchesDueFilter(todo: Todo, dueFilter: DueFilter): boolean {
+  if (dueFilter === 'all') return true;
+  if (dueFilter === 'no-due-date') return !todo.due_date;
+  if (!todo.due_date) return false;
+  if (dueFilter === 'overdue') return isOverdue(todo.due_date);
+  if (dueFilter === 'today') return isDueToday(todo.due_date);
+  return isDueThisWeek(todo.due_date);
 }
 
 function PriorityBadge({ priority }: { priority: Priority }) {
@@ -368,14 +383,6 @@ function TodoCard({
           </div>
         )}
 
-        {(todo.tags ?? []).length > 0 && (
-          <div className="mt-2 flex items-center gap-1.5 flex-wrap">
-            {(todo.tags ?? []).map((tag) => (
-              <TagPill key={tag.id} tag={tag} />
-            ))}
-          </div>
-        )}
-
         <div className="mt-3 border border-gray-200 rounded-lg p-3 bg-gray-50" data-testid="subtasks-section">
           <div className="flex items-center justify-between mb-2">
             <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Subtasks</p>
@@ -492,10 +499,14 @@ export default function HomePage() {
   const [editingTagColor, setEditingTagColor] = useState('#3B82F6');
   const [titleError, setTitleError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [searchInput, setSearchInput] = useState('');
+  const [debouncedSearchInput, setDebouncedSearchInput] = useState('');
   const [priorityFilter, setPriorityFilter] = useState<'all' | Priority>('all');
   const [tagFilter, setTagFilter] = useState<'all' | number>('all');
   const [subtasksByTodo, setSubtasksByTodo] = useState<Record<number, Subtask[]>>({});
   const [subtaskDrafts, setSubtaskDrafts] = useState<Record<number, string>>({});
+  const [completionFilter, setCompletionFilter] = useState<CompletionFilter>('all');
+  const [dueFilter, setDueFilter] = useState<DueFilter>('all');
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const subtaskIdCounterRef = useRef(1);
 
@@ -512,6 +523,19 @@ export default function HomePage() {
       if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchInput(searchInput);
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
+  useEffect(() => {
+    if (tagFilter !== 'all' && !tags.some((tag) => tag.id === tagFilter)) {
+      setTagFilter('all');
+    }
+  }, [tagFilter, tags]);
 
   // Notification polling — fires immediately then every 30 seconds when enabled
   useEffect(() => {
@@ -643,7 +667,19 @@ export default function HomePage() {
 
   const updateTodo = async (id: number, data: TodoUpdatePayload) => {
     const previous = todos.find(t => t.id === id);
-    setTodos(prev => prev.map(t => t.id === id ? { ...t, ...data } : t));
+    const optimisticTags = data.tagIds !== undefined
+      ? tags.filter((tag) => data.tagIds?.includes(tag.id))
+      : undefined;
+
+    setTodos(prev => prev.map((todo) => {
+      if (todo.id !== id) return todo;
+      const { tagIds, ...rest } = data;
+      return {
+        ...todo,
+        ...rest,
+        ...(optimisticTags ? { tags: optimisticTags } : {}),
+      };
+    }));
 
     try {
       const res = await fetch(`/api/todos/${id}`, {
@@ -748,13 +784,36 @@ export default function HomePage() {
       };
     });
   };
+  const normalizedSearchQuery = useMemo(
+    () => normalizeSearchValue(debouncedSearchInput),
+    [debouncedSearchInput]
+  );
 
-  const filtered = priorityFilter === 'all' ? todos : todos.filter(t => t.priority === priorityFilter);
-  const filteredByTag = tagFilter === 'all'
-    ? filtered
-    : filtered.filter((todo) => (todo.tags ?? []).some((tag) => tag.id === tagFilter));
-  const activeTodos = filteredByTag.filter(t => !t.completed);
-  const completedTodos = filteredByTag.filter(t => t.completed);
+  const filteredTodos = useMemo(() => {
+    return todos.filter((todo) => {
+      if (completionFilter === 'active' && todo.completed) return false;
+      if (completionFilter === 'completed' && !todo.completed) return false;
+      if (priorityFilter !== 'all' && todo.priority !== priorityFilter) return false;
+      if (tagFilter !== 'all' && !(todo.tags ?? []).some((tag) => tag.id === tagFilter)) return false;
+      if (!matchesDueFilter(todo, dueFilter)) return false;
+
+      if (!normalizedSearchQuery) return true;
+      const titleMatches = normalizeSearchValue(todo.title).includes(normalizedSearchQuery);
+      const tagMatches = (todo.tags ?? []).some((tag) =>
+        normalizeSearchValue(tag.name).includes(normalizedSearchQuery)
+      );
+      return titleMatches || tagMatches;
+    });
+  }, [todos, priorityFilter, tagFilter, completionFilter, dueFilter, normalizedSearchQuery]);
+
+  const activeTodos = filteredTodos.filter((todo) => !todo.completed);
+  const completedTodos = filteredTodos.filter((todo) => todo.completed);
+  const hasActiveFilter =
+    !!normalizedSearchQuery ||
+    priorityFilter !== 'all' ||
+    tagFilter !== 'all' ||
+    completionFilter !== 'all' ||
+    dueFilter !== 'all';
 
   const createTag = async () => {
     const name = newTagName.trim();
@@ -1100,6 +1159,22 @@ export default function HomePage() {
 
       {/* Filters */}
       <div className="flex items-center gap-2 mb-4 flex-wrap">
+        <input
+          data-testid="todo-search-input"
+          type="text"
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          placeholder="Search todos by title or tag..."
+          className="min-w-[240px] flex-1 border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+        />
+        {searchInput && (
+          <button
+            onClick={() => setSearchInput('')}
+            className="text-xs text-gray-400 hover:text-gray-600"
+          >
+            Clear Search ✕
+          </button>
+        )}
         <span className="text-sm text-gray-500">Filter by Priority:</span>
         <select
           data-testid="priority-filter"
@@ -1119,6 +1194,7 @@ export default function HomePage() {
         )}
         <span className="text-sm text-gray-500 ml-2">Tag:</span>
         <select
+          data-testid="tag-filter"
           value={tagFilter === 'all' ? 'all' : String(tagFilter)}
           onChange={(e) => setTagFilter(e.target.value === 'all' ? 'all' : Number(e.target.value))}
           className={`border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 ${tagFilter !== 'all' ? 'border-blue-400 text-blue-700 bg-blue-50' : 'border-gray-300'}`}
@@ -1128,6 +1204,30 @@ export default function HomePage() {
             <option key={tag.id} value={tag.id}>{tag.name}</option>
           ))}
         </select>
+        <span className="text-sm text-gray-500 ml-2">Status:</span>
+        <select
+          data-testid="completion-filter"
+          value={completionFilter}
+          onChange={(e) => setCompletionFilter(e.target.value as CompletionFilter)}
+          className={`border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 ${completionFilter !== 'all' ? 'border-blue-400 text-blue-700 bg-blue-50' : 'border-gray-300'}`}
+        >
+          <option value="all">All</option>
+          <option value="active">Active</option>
+          <option value="completed">Completed</option>
+        </select>
+        <span className="text-sm text-gray-500 ml-2">Due:</span>
+        <select
+          data-testid="due-filter"
+          value={dueFilter}
+          onChange={(e) => setDueFilter(e.target.value as DueFilter)}
+          className={`border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 ${dueFilter !== 'all' ? 'border-blue-400 text-blue-700 bg-blue-50' : 'border-gray-300'}`}
+        >
+          <option value="all">All</option>
+          <option value="overdue">Overdue</option>
+          <option value="today">Today</option>
+          <option value="this-week">This Week</option>
+          <option value="no-due-date">No Due Date</option>
+        </select>
         {tagFilter !== 'all' && (
           <button
             onClick={() => setTagFilter('all')}
@@ -1136,20 +1236,40 @@ export default function HomePage() {
             Clear Tag ✕
           </button>
         )}
+        {hasActiveFilter && (
+          <button
+            onClick={() => {
+              setSearchInput('');
+              setDebouncedSearchInput('');
+              setPriorityFilter('all');
+              setTagFilter('all');
+              setCompletionFilter('all');
+              setDueFilter('all');
+            }}
+            data-testid="clear-all-filters"
+            className="text-xs text-gray-500 hover:text-gray-700"
+          >
+            Clear All Filters
+          </button>
+        )}
       </div>
+      <p className="text-xs text-gray-500 mb-3">
+        Showing {filteredTodos.length} of {todos.length} todos
+      </p>
 
       {/* Active Todos */}
       <section data-testid="active-section">
         {loading ? (
           <p className="text-gray-400 text-center py-8">Loading...</p>
-        ) : activeTodos.length === 0 ? (
-            <p className="text-gray-400 text-center py-8">No todos match the current filters.</p>
+        ) : filteredTodos.length === 0 ? (
+          <p className="text-gray-400 text-center py-8">No todos match the current search or filters.</p>
+        ) : completionFilter === 'completed' ? null : activeTodos.length === 0 ? (
+          <p className="text-gray-400 text-center py-6">No active todos match the current search or filters.</p>
         ) : (
           activeTodos.map(todo => (
             <TodoCard
               key={todo.id}
               todo={todo}
-              availableTags={tags}
               availableTags={tags}
               subtasks={subtasksByTodo[todo.id] ?? []}
               subtaskDraft={subtaskDrafts[todo.id] ?? ''}
@@ -1170,7 +1290,7 @@ export default function HomePage() {
       </section>
 
       {/* Completed Todos */}
-      {completedTodos.length > 0 && (
+      {completedTodos.length > 0 && completionFilter !== 'active' && (
         <section data-testid="completed-section" className="mt-6">
           <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">
             Completed ({completedTodos.length})
@@ -1179,7 +1299,6 @@ export default function HomePage() {
             <TodoCard
               key={todo.id}
               todo={todo}
-              availableTags={tags}
               availableTags={tags}
               subtasks={subtasksByTodo[todo.id] ?? []}
               subtaskDraft={subtaskDrafts[todo.id] ?? ''}

@@ -55,6 +55,9 @@ export async function POST(request: Request) {
     if (reminder_minutes !== undefined && reminder_minutes !== null && (!Number.isInteger(reminder_minutes) || Number(reminder_minutes) <= 0)) {
       return NextResponse.json({ error: 'reminder_minutes must be a positive integer or null' }, { status: 400 });
     }
+    if (reminder_minutes !== undefined && reminder_minutes !== null && !due_date) {
+      return NextResponse.json({ error: 'reminder_minutes requires due_date' }, { status: 400 });
+    }
 
     if (reminder_minutes !== undefined && reminder_minutes !== null && !due_date) {
       return NextResponse.json({ error: 'Reminders require a due date' }, { status: 400 });
