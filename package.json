@@ -2,6 +2,7 @@
   "name": "todo-app",
   "version": "0.1.0",
   "private": true,
+  "description": "This walkthrough will guide you from zero to running the Todo App with GitHub Copilot assistance.",
   "engines": {
     "node": ">=20.0.0",
     "npm": ">=10.0.0"
@@ -10,7 +11,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:unit": "vitest run tests/unit",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@simplewebauthn/browser": "^13.2.2",
@@ -21,6 +24,17 @@
     "react": "19.2.0",
     "react-dom": "19.2.0"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Cindyyeo12345/AI-SDLC-Workshop-Day1n2.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Cindyyeo12345/AI-SDLC-Workshop-Day1n2/issues"
+  },
+  "homepage": "https://github.com/Cindyyeo12345/AI-SDLC-Workshop-Day1n2#readme",
   "devDependencies": {
     "@playwright/test": "^1.56.1",
     "@tailwindcss/postcss": "^4",
@@ -32,6 +46,7 @@
     "eslint-config-next": "16.0.1",
     "tailwindcss": "^4",
     "tsx": "^4.20.6",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^2.1.9"
   }
 }
