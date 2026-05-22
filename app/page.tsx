@@ -26,6 +26,24 @@ interface EditState {
   title: string;
   due_date: string;
   notes: string;
+  priority: Priority;
+}
+
+const PRIORITY_STYLES: Record<Priority, string> = {
+  high:   'bg-red-500 text-white',
+  medium: 'bg-yellow-500 text-white',
+  low:    'bg-blue-500 text-white',
+};
+
+function PriorityBadge({ priority }: { priority: Priority }) {
+  return (
+    <span
+      className={`text-xs px-2 py-0.5 rounded-full font-semibold ${PRIORITY_STYLES[priority]}`}
+      aria-label={`Priority: ${priority}`}
+    >
+      {priority.toUpperCase()}
+    </span>
+  );
 }
 
 function DueDateBadge({ dueDate }: { dueDate: string }) {
@@ -92,6 +110,7 @@ function TodoCard({
     title: todo.title,
     due_date: todo.due_date ?? '',
     notes: todo.notes ?? '',
+    priority: todo.priority,
   });
   const [editError, setEditError] = useState<string | null>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
@@ -102,6 +121,7 @@ function TodoCard({
         title: todo.title,
         due_date: todo.due_date ?? '',
         notes: todo.notes ?? '',
+        priority: todo.priority,
       });
       setEditError(null);
       setTimeout(() => titleInputRef.current?.focus(), 0);
@@ -117,6 +137,7 @@ function TodoCard({
       title: editState.title.trim(),
       due_date: editState.due_date || null,
       notes: editState.notes || null,
+      priority: editState.priority,
     });
   };
 
@@ -141,12 +162,24 @@ function TodoCard({
           className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm mb-2 focus:outline-none focus:ring-2 focus:ring-blue-400"
           placeholder="Todo title"
         />
-        <input
-          type="datetime-local"
-          value={editState.due_date}
-          onChange={e => setEditState(s => ({ ...s, due_date: e.target.value }))}
-          className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm mb-2 focus:outline-none focus:ring-2 focus:ring-blue-400"
-        />
+        <div className="flex gap-2 mb-2">
+          <select
+            data-testid="edit-priority-select"
+            value={editState.priority}
+            onChange={e => setEditState(s => ({ ...s, priority: e.target.value as Priority }))}
+            className="border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+          >
+            <option value="high">High Priority</option>
+            <option value="medium">Medium Priority</option>
+            <option value="low">Low Priority</option>
+          </select>
+          <input
+            type="datetime-local"
+            value={editState.due_date}
+            onChange={e => setEditState(s => ({ ...s, due_date: e.target.value }))}
+            className="flex-1 border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+          />
+        </div>
         <textarea
           value={editState.notes}
           onChange={e => setEditState(s => ({ ...s, notes: e.target.value }))}
@@ -188,9 +221,12 @@ function TodoCard({
         className="mt-0.5 w-4 h-4 cursor-pointer accent-blue-600"
       />
       <div className="flex-1 min-w-0">
-        <p className={`text-sm font-medium ${todo.completed ? 'line-through text-gray-400' : 'text-gray-900'}`}>
-          {todo.title}
-        </p>
+        <div className="flex items-center gap-2 flex-wrap">
+          <p className={`text-sm font-medium ${todo.completed ? 'line-through text-gray-400' : 'text-gray-900'}`}>
+            {todo.title}
+          </p>
+          <PriorityBadge priority={todo.priority} />
+        </div>
         {todo.due_date && (
           <div className="mt-1">
             <DueDateBadge dueDate={todo.due_date} />
@@ -229,8 +265,10 @@ export default function HomePage() {
   const [newTitle, setNewTitle] = useState('');
   const [newDueDate, setNewDueDate] = useState('');
   const [newNotes, setNewNotes] = useState('');
+  const [newPriority, setNewPriority] = useState<Priority>('medium');
   const [titleError, setTitleError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [priorityFilter, setPriorityFilter] = useState<'all' | Priority>('all');
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const showError = (msg: string) => {
@@ -280,7 +318,7 @@ export default function HomePage() {
       user_id: 0,
       title: newTitle.trim(),
       completed: false,
-      priority: 'medium',
+      priority: newPriority,
       due_date: newDueDate || null,
       notes: newNotes || null,
       recurrence: null,
@@ -293,15 +331,22 @@ export default function HomePage() {
 
     setTodos(prev => [optimistic, ...prev]);
     const savedTitle = newTitle.trim();
+    const savedPriority = newPriority;
     setNewTitle('');
     setNewDueDate('');
     setNewNotes('');
+    setNewPriority('medium');
 
     try {
       const res = await fetch('/api/todos', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: savedTitle, due_date: optimistic.due_date, notes: optimistic.notes }),
+        body: JSON.stringify({
+          title: savedTitle,
+          due_date: optimistic.due_date,
+          notes: optimistic.notes,
+          priority: savedPriority,
+        }),
       });
       if (!res.ok) throw new Error(await res.text());
       const created: Todo = await res.json();
@@ -351,8 +396,9 @@ export default function HomePage() {
 
   const toggleComplete = (todo: Todo) => updateTodo(todo.id, { completed: !todo.completed });
 
-  const activeTodos = todos.filter(t => !t.completed);
-  const completedTodos = todos.filter(t => t.completed);
+  const filtered = priorityFilter === 'all' ? todos : todos.filter(t => t.priority === priorityFilter);
+  const activeTodos = filtered.filter(t => !t.completed);
+  const completedTodos = filtered.filter(t => t.completed);
 
   const handleLogout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' });
@@ -383,7 +429,7 @@ export default function HomePage() {
       )}
 
       {/* Add Todo Form */}
-      <div className="bg-white border border-gray-200 rounded-xl p-4 mb-6 shadow-sm">
+      <div className="bg-white border border-gray-200 rounded-xl p-4 mb-4 shadow-sm">
         <div className="flex gap-2 mb-2">
           <input
             data-testid="new-todo-input"
@@ -406,6 +452,16 @@ export default function HomePage() {
           <p data-testid="error-message" className="text-red-500 text-xs mb-2">{titleError}</p>
         )}
         <div className="flex gap-2">
+          <select
+            data-testid="new-priority-select"
+            value={newPriority}
+            onChange={e => setNewPriority(e.target.value as Priority)}
+            className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+          >
+            <option value="high">High Priority</option>
+            <option value="medium">Medium Priority</option>
+            <option value="low">Low Priority</option>
+          </select>
           <input
             data-testid="new-due-date-input"
             type="datetime-local"
@@ -425,12 +481,38 @@ export default function HomePage() {
         </div>
       </div>
 
+      {/* Priority Filter */}
+      <div className="flex items-center gap-2 mb-4">
+        <span className="text-sm text-gray-500">Filter by Priority:</span>
+        <select
+          data-testid="priority-filter"
+          value={priorityFilter}
+          onChange={e => setPriorityFilter(e.target.value as 'all' | Priority)}
+          className={`border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 ${priorityFilter !== 'all' ? 'border-blue-400 text-blue-700 bg-blue-50' : 'border-gray-300'}`}
+        >
+          <option value="all">All Priorities</option>
+          <option value="high">High Only</option>
+          <option value="medium">Medium Only</option>
+          <option value="low">Low Only</option>
+        </select>
+        {priorityFilter !== 'all' && (
+          <button
+            onClick={() => setPriorityFilter('all')}
+            className="text-xs text-gray-400 hover:text-gray-600"
+          >
+            Clear ✕
+          </button>
+        )}
+      </div>
+
       {/* Active Todos */}
       <section data-testid="active-section">
         {loading ? (
           <p className="text-gray-400 text-center py-8">Loading...</p>
         ) : activeTodos.length === 0 ? (
-          <p className="text-gray-400 text-center py-8">No todos yet. Add one above!</p>
+          <p className="text-gray-400 text-center py-8">
+            {priorityFilter !== 'all' ? `No ${priorityFilter} priority todos.` : 'No todos yet. Add one above!'}
+          </p>
         ) : (
           activeTodos.map(todo => (
             <TodoCard

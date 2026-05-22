@@ -84,6 +84,7 @@ export const todoDB = {
       WHERE user_id = ?
       ORDER BY
         completed ASC,
+        CASE priority WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END ASC,
         CASE WHEN due_date IS NULL THEN 1 ELSE 0 END ASC,
         due_date ASC,
         created_at DESC
